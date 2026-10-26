@@ -79,6 +79,40 @@
   }
   select:focus, input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
 
+  /* ---- Multi-select dropdown ---- */
+  .ms{ position:relative; font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  .ms-btn{
+    width:100%; text-align:left; font:inherit; font-size:13px;
+    padding:9px 26px 9px 8px; border:1px solid var(--line); border-radius:3px;
+    background:var(--paper); color:var(--ink); cursor:pointer;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative;
+  }
+  .ms-btn::after{
+    content:''; position:absolute; right:9px; top:50%; margin-top:-3px;
+    border:4px solid transparent; border-top-color:var(--muted); border-bottom:0;
+  }
+  .ms-btn:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .ms.active .ms-btn{ border-color:var(--accent); background:#eef3ec; }
+  .ms-panel{
+    display:none; position:absolute; top:calc(100% + 3px); left:0; z-index:1000;
+    min-width:max(100%, 230px); max-width:320px;
+    background:var(--panel); border:1px solid var(--line); border-radius:4px;
+    box-shadow:0 6px 18px rgba(0,0,0,.14); padding:6px;
+  }
+  .ms.open .ms-panel{ display:block; }
+  .ms.align-right .ms-panel{ left:auto; right:0; }
+  .ms-search{ width:100%; margin-bottom:6px; padding:6px 8px !important; font-size:12.5px !important; }
+  .ms-actions{ display:flex; gap:12px; padding:2px 4px 6px; font-size:12px; }
+  .ms-actions a{ color:var(--accent); cursor:pointer; text-decoration:underline; }
+  .ms-list{ max-height:240px; overflow-y:auto; }
+  .ms-opt{
+    display:flex; align-items:center; gap:8px; padding:5px 6px; border-radius:3px;
+    font-size:12.5px; cursor:pointer; line-height:1.3;
+  }
+  .ms-opt:hover{ background:var(--paper); }
+  .ms-opt input{ margin:0; flex:none; }
+  .ms-empty{ padding:6px; font-size:12px; color:var(--muted); }
+
   .filter-row{
     display:grid;
     grid-template-columns: repeat(4, 1fr);
@@ -205,27 +239,19 @@
     <div class="filter-row">
       <div>
         <span class="field-label">Negocio</span>
-        <select id="negocioFilter">
-          <option value="">Todos los negocios</option>
-        </select>
+        <div class="ms" id="negocioFilter"></div>
       </div>
       <div>
         <span class="field-label">Nivel de riesgo</span>
-        <select id="nivelFilter">
-          <option value="">Todos los niveles</option>
-        </select>
+        <div class="ms" id="nivelFilter"></div>
       </div>
       <div>
         <span class="field-label">Departamento</span>
-        <select id="departamentoFilter">
-          <option value="">Todos los departamentos</option>
-        </select>
+        <div class="ms align-right" id="departamentoFilter"></div>
       </div>
       <div>
         <span class="field-label">Provincia</span>
-        <select id="provinciaFilter">
-          <option value="">Todas las provincias</option>
-        </select>
+        <div class="ms align-right" id="provinciaFilter"></div>
       </div>
     </div>
 
@@ -365,70 +391,131 @@ ALMACENES.forEach(a=>{
   whMarkers.push({ data: a, marker });
 });
 
-// ---- Negocio filter dropdown ----
-const negocioSelect = document.getElementById('negocioFilter');
-const negocios = [...new Set(ALMACENES.map(a=>a.negocio))].sort();
-negocios.forEach(n=>{
-  const opt = document.createElement('option');
-  opt.value = n; opt.textContent = n;
-  negocioSelect.appendChild(opt);
+// ---- Multi-select dropdown component ----
+function createMultiSelect(root, allLabel, onChange){
+  const state = { options: [], selected: new Set() };
+  root.innerHTML = '';
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'ms-btn';
+  const panel = document.createElement('div'); panel.className = 'ms-panel';
+  const search = document.createElement('input');
+  search.type = 'text'; search.className = 'ms-search'; search.placeholder = 'Buscar...';
+  const actions = document.createElement('div'); actions.className = 'ms-actions';
+  const aAll = document.createElement('a'); aAll.textContent = 'Seleccionar todo';
+  const aNone = document.createElement('a'); aNone.textContent = 'Limpiar';
+  actions.appendChild(aAll); actions.appendChild(aNone);
+  const list = document.createElement('div'); list.className = 'ms-list';
+  panel.appendChild(search); panel.appendChild(actions); panel.appendChild(list);
+  root.appendChild(btn); root.appendChild(panel);
+
+  function updateButton(){
+    const n = state.selected.size;
+    if(n === 0){ btn.textContent = allLabel; root.classList.remove('active'); }
+    else if(n === 1){ btn.textContent = [...state.selected][0]; root.classList.add('active'); }
+    else { btn.textContent = n + ' seleccionados'; root.classList.add('active'); }
+    btn.title = n ? [...state.selected].join(', ') : '';
+  }
+  function renderList(){
+    const q = search.value.trim().toLocaleUpperCase('es-PE');
+    list.innerHTML = '';
+    const shown = state.options.filter(o => !q || o.toLocaleUpperCase('es-PE').includes(q));
+    if(!shown.length){
+      const e = document.createElement('div'); e.className = 'ms-empty'; e.textContent = 'Sin resultados';
+      list.appendChild(e); return;
+    }
+    shown.forEach(o=>{
+      const lab = document.createElement('label'); lab.className = 'ms-opt';
+      const cb = document.createElement('input'); cb.type = 'checkbox';
+      cb.checked = state.selected.has(o);
+      cb.addEventListener('change', ()=>{
+        if(cb.checked) state.selected.add(o); else state.selected.delete(o);
+        updateButton(); onChange();
+      });
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(o));
+      list.appendChild(lab);
+    });
+  }
+  btn.addEventListener('click', e=>{
+    e.stopPropagation();
+    const wasOpen = root.classList.contains('open');
+    document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
+    if(!wasOpen){ root.classList.add('open'); search.value = ''; renderList(); }
+  });
+  panel.addEventListener('click', e=>e.stopPropagation());
+  search.addEventListener('input', renderList);
+  aAll.addEventListener('click', ()=>{
+    const q = search.value.trim().toLocaleUpperCase('es-PE');
+    state.options.filter(o => !q || o.toLocaleUpperCase('es-PE').includes(q)).forEach(o=>state.selected.add(o));
+    renderList(); updateButton(); onChange();
+  });
+  aNone.addEventListener('click', ()=>{
+    state.selected.clear(); renderList(); updateButton(); onChange();
+  });
+  updateButton();
+  return {
+    values: ()=> [...state.selected],
+    setOptions: (opts)=>{
+      state.options = opts;
+      [...state.selected].forEach(v=>{ if(!opts.includes(v)) state.selected.delete(v); });
+      updateButton();
+      if(root.classList.contains('open')) renderList();
+    }
+  };
+}
+document.addEventListener('click', ()=>{
+  document.querySelectorAll('.ms.open').forEach(m=>m.classList.remove('open'));
 });
 
-// ---- Nivel de riesgo filter dropdown (almacenes) ----
-const nivelSelect = document.getElementById('nivelFilter');
-LEVELS.forEach(l=>{
-  const opt = document.createElement('option');
-  opt.value = l.key; opt.textContent = l.key;
-  nivelSelect.appendChild(opt);
+const negocioMS = createMultiSelect(document.getElementById('negocioFilter'), 'Todos los negocios', refreshAlmacenViews);
+const nivelMS = createMultiSelect(document.getElementById('nivelFilter'), 'Todos los niveles', refreshAlmacenViews);
+const departamentoMS = createMultiSelect(document.getElementById('departamentoFilter'), 'Todos los departamentos', ()=>{
+  populateProvinciaOptions();
+  refreshAlmacenViews();
 });
+const provinciaMS = createMultiSelect(document.getElementById('provinciaFilter'), 'Todas las provincias', refreshAlmacenViews);
 
-// ---- Departamento filter dropdown (almacenes) ----
-const departamentoSelect = document.getElementById('departamentoFilter');
-const almDepartamentos = [...new Set(ALMACENES.map(a=>a.departamento).filter(Boolean))].sort();
-almDepartamentos.forEach(d=>{
-  const opt = document.createElement('option');
-  opt.value = d; opt.textContent = d;
-  departamentoSelect.appendChild(opt);
-});
+negocioMS.setOptions([...new Set(ALMACENES.map(a=>a.negocio))].sort());
+nivelMS.setOptions(LEVELS.map(l=>l.key));
+departamentoMS.setOptions([...new Set(ALMACENES.map(a=>a.departamento).filter(Boolean))].sort());
 
-// ---- Provincia filter dropdown (almacenes, en cascada con Departamento) ----
-const provinciaSelect = document.getElementById('provinciaFilter');
-function populateProvinciaOptions(departamentoVal){
-  const current = provinciaSelect.value;
-  provinciaSelect.innerHTML = '<option value="">Todas las provincias</option>';
-  const provs = [...new Set(
+// Provincia en cascada con Departamento (sin departamentos seleccionados = todas)
+function populateProvinciaOptions(){
+  const deps = departamentoMS.values();
+  provinciaMS.setOptions([...new Set(
     ALMACENES
-      .filter(a=> !departamentoVal || a.departamento === departamentoVal)
+      .filter(a=> !deps.length || deps.includes(a.departamento))
       .map(a=>a.provincia)
       .filter(Boolean)
-  )].sort();
-  provs.forEach(p=>{
-    const opt = document.createElement('option');
-    opt.value = p; opt.textContent = p;
-    provinciaSelect.appendChild(opt);
-  });
-  if(provs.includes(current)){ provinciaSelect.value = current; }
+  )].sort());
 }
-populateProvinciaOptions('');
+populateProvinciaOptions();
 
-function getFilteredAlmacenes(negocioVal, nivelVal, departamentoVal, provinciaVal){
-  return whMarkers
-    .map(wm=>wm)
-    .filter(wm=>
-      (!negocioVal || wm.data.negocio === negocioVal) &&
-      (!nivelVal || wm.data.nivel === nivelVal) &&
-      (!departamentoVal || wm.data.departamento === departamentoVal) &&
-      (!provinciaVal || wm.data.provincia === provinciaVal)
-    );
+function currentFilters(){
+  return {
+    negocios: negocioMS.values(),
+    niveles: nivelMS.values(),
+    departamentos: departamentoMS.values(),
+    provincias: provinciaMS.values()
+  };
+}
+
+function getFilteredAlmacenes(f){
+  return whMarkers.filter(wm=>
+    (!f.negocios.length || f.negocios.includes(wm.data.negocio)) &&
+    (!f.niveles.length || f.niveles.includes(wm.data.nivel)) &&
+    (!f.departamentos.length || f.departamentos.includes(wm.data.departamento)) &&
+    (!f.provincias.length || f.provincias.includes(wm.data.provincia))
+  );
 }
 
 // ---- Warehouse summary table ----
 const whTableBody = document.getElementById('whTableBody');
 const almacenSearchInput = document.getElementById('almacenSearch');
-function renderWhTable(negocioVal, nivelVal, departamentoVal, provinciaVal){
+function renderWhTable(f){
   whTableBody.innerHTML = '';
   const searchVal = almacenSearchInput.value.trim().toLocaleUpperCase('es-PE');
-  getFilteredAlmacenes(negocioVal, nivelVal, departamentoVal, provinciaVal)
+  getFilteredAlmacenes(f)
     .filter(wm => !searchVal || wm.data.almacen.toLocaleUpperCase('es-PE').includes(searchVal))
     .forEach(wm=>{
     const a = wm.data;
@@ -448,9 +535,9 @@ function renderWhTable(negocioVal, nivelVal, departamentoVal, provinciaVal){
   });
 }
 
-function renderWhMarkers(negocioVal, nivelVal, departamentoVal, provinciaVal){
+function renderWhMarkers(f){
   whLayer.clearLayers();
-  getFilteredAlmacenes(negocioVal, nivelVal, departamentoVal, provinciaVal).forEach(wm=>{
+  getFilteredAlmacenes(f).forEach(wm=>{
     wm.marker.addTo(whLayer);
   });
 }
@@ -459,11 +546,12 @@ function fmtMiles(v){
   return v.toLocaleString('es-PE', {minimumFractionDigits:1, maximumFractionDigits:1});
 }
 
-function renderWhSummary(negocioVal, nivelVal, departamentoVal, provinciaVal){
-  const filtered = getFilteredAlmacenes(negocioVal, nivelVal, departamentoVal, provinciaVal).map(wm=>wm.data);
+function renderWhSummary(f){
+  const filtered = getFilteredAlmacenes(f).map(wm=>wm.data);
   const total = filtered.length;
   const totalValorizado = filtered.reduce((s,a)=> s + (a.valorizadoMiles || 0), 0);
-  const labelParts = [negocioVal, nivelVal, departamentoVal, provinciaVal].filter(Boolean);
+  const labelParts = [f.negocios, f.niveles, f.departamentos, f.provincias]
+    .filter(g=>g.length).map(g=>g.join(' + '));
   document.getElementById('whSummaryTotal').innerHTML =
     `${total.toLocaleString('es-PE')} <span>almacen${total===1?'':'es'}${labelParts.length ? ' &middot; ' + labelParts.join(' &middot; ') : ''}</span>
      <div style="font-size:14px; font-weight:600; color:var(--ink); margin-top:2px;">S/ ${fmtMiles(totalValorizado)} <span style="font-size:11.5px; font-weight:400; color:var(--muted);">miles valorizado</span></div>`;
@@ -500,14 +588,11 @@ function renderWhSummary(negocioVal, nivelVal, departamentoVal, provinciaVal){
 }
 
 function refreshAlmacenViews(){
-  const negocioVal = negocioSelect.value;
-  const nivelVal = nivelSelect.value;
-  const departamentoVal = departamentoSelect.value;
-  const provinciaVal = provinciaSelect.value;
-  renderWhTable(negocioVal, nivelVal, departamentoVal, provinciaVal);
-  renderWhSummary(negocioVal, nivelVal, departamentoVal, provinciaVal);
+  const f = currentFilters();
+  renderWhTable(f);
+  renderWhSummary(f);
   if(document.getElementById('whToggle').checked){
-    renderWhMarkers(negocioVal, nivelVal, departamentoVal, provinciaVal);
+    renderWhMarkers(f);
   } else {
     whLayer.clearLayers();
   }
@@ -515,20 +600,9 @@ function refreshAlmacenViews(){
 
 refreshAlmacenViews();
 
-negocioSelect.addEventListener('change', refreshAlmacenViews);
-nivelSelect.addEventListener('change', refreshAlmacenViews);
-departamentoSelect.addEventListener('change', ()=>{
-  populateProvinciaOptions(departamentoSelect.value);
-  refreshAlmacenViews();
-});
-provinciaSelect.addEventListener('change', refreshAlmacenViews);
 document.getElementById('whToggle').addEventListener('change', refreshAlmacenViews);
 almacenSearchInput.addEventListener('input', ()=>{
-  const negocioVal = negocioSelect.value;
-  const nivelVal = nivelSelect.value;
-  const departamentoVal = departamentoSelect.value;
-  const provinciaVal = provinciaSelect.value;
-  renderWhTable(negocioVal, nivelVal, departamentoVal, provinciaVal);
+  renderWhTable(currentFilters());
 });
 
 // ---- Filters (district choropleth) ----
